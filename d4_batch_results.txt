@@ -1,0 +1,4 @@
+  N | tok/req | tok/passage | median ms | passages/s | tokens/s
+  1 |      68 |          68 |       481 |        2.1 |      141
+ 16 |    1088 |          68 |      1037 |       15.4 |     1049
+ 64 |    4352 |          68 |      1583 |       40.4 |     2749
