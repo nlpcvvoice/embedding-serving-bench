@@ -78,4 +78,4 @@ python3 nim_step5_concurrency.py
 | 64 | 1902.9 | 1743.1 | 0.92x |
 | 256 | 2615.8 | 2657.6 | 1.02x |
 
-No 2x at 1B + short ISL: the ratio climbs monotonically with batch size but the claimed "up to 2x" lives in the online-serving, long-ISL regime, not in offline short-prompt batching. Quantization wins when the workload is weight-bandwidth-bound — bigger model, bigger batch, longer sequences.
+No 2x at 1B + short ISL: the ratio climbs monotonically with batch size (0.59x at N=1 to 1.02x eager; up to 1.21x at ISL~1024 with CUDA graphs on). The blog's "up to 2x" sentence specifies no engine, ISL, or batch; on vLLM we could not reach it for a dense 1B encoder. Community measurements put large FP4 gains behind tuned kernels (SGLang 2.2-3.5x on MoE) and weight-bound workloads, while vLLM's generic CUTLASS path caps near 1.2x for dense models and goes sub-1x at batch 1.
