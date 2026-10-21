@@ -4,7 +4,7 @@ Benchmark harness for embedding serving, first run against `nvidia/nemotron-3-em
 
 ## Why
 
-Replicate the methodology of Figure 5 in the Nemotron-3-Embed blog: throughput versus input sequence length, batch size, and concurrency.
+Replicate the serving-performance methodology of the Nemotron-3-Embed blog: throughput versus input sequence length, batch size, and concurrency.
 
 ## Request shape
 
@@ -68,5 +68,14 @@ python3 nim_step5_concurrency.py
 ## Next
 
 - Keep doubling C until throughput flattens — the saturation knee
-- Blackwell hardware for the NVFP4 vs BF16 throughput claim
-- Rust client (tokio + reqwest) to compare client-side overhead
+
+## NVFP4 vs BF16 on Blackwell (Modal B200, vLLM offline, 2026-10-20)
+
+| N | BF16 (passages/s) | NVFP4 (passages/s) | ratio |
+|---|-------------------|--------------------|-------|
+| 1 | 118.3 | 70.3 | 0.59x |
+| 16 | 723.1 | 560.2 | 0.77x |
+| 64 | 1902.9 | 1743.1 | 0.92x |
+| 256 | 2615.8 | 2657.6 | 1.02x |
+
+No 2x at 1B + short ISL: the ratio climbs monotonically with batch size but the claimed "up to 2x" lives in the online-serving, long-ISL regime, not in offline short-prompt batching. Quantization wins when the workload is weight-bandwidth-bound — bigger model, bigger batch, longer sequences.
