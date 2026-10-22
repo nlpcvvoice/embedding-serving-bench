@@ -6,6 +6,15 @@ Benchmark harness for embedding serving, first run against `nvidia/nemotron-3-em
 
 Replicate the serving-performance methodology of the Nemotron-3-Embed blog: throughput versus input sequence length, batch size, and concurrency.
 
+## Layout
+
+```
+src/     benchmark scripts (run from repo root)
+data/    archived raw results
+docs/    methodology notes
+tests/   sanity checks
+```
+
 ## Request shape
 
 ```
@@ -25,15 +34,15 @@ Response: `data[i]["embedding"]` (2048-dim float vector per input) + `usage.prom
 
 | Script | Knob | Design |
 |--------|------|--------|
-| `nim_step1.py` | — | first call, response shape, rate-limit headers |
-| `nim_step2_ratelimit.py` | — | 30 back-to-back requests to find the free-tier 429 ceiling |
-| `nim_step3_isl.py` | ISL | same paragraph x4 / x16 (~270 / ~1100 tokens), only length varies |
-| `nim_step4_batch.py` | batch N | 1 / 16 / 64 passages per request, 10 interleaved rounds, medians |
-| `nim_step5_concurrency.py` | concurrency C | Python threads, C=1/2/4, 16 passages/request, pre-allocated per-thread result slots (no locks) |
+| `src/nim_step1.py` | — | first call, response shape, rate-limit headers |
+| `src/nim_step2_ratelimit.py` | — | 30 back-to-back requests to find the free-tier 429 ceiling |
+| `src/nim_step3_isl.py` | ISL | same paragraph x4 / x16 (~270 / ~1100 tokens), only length varies |
+| `src/nim_step4_batch.py` | batch N | 1 / 16 / 64 passages per request, 10 interleaved rounds, medians |
+| `src/nim_step5_concurrency.py` | concurrency C | Python threads, C=1/2/4, 16 passages/request, pre-allocated per-thread result slots (no locks) |
 
 ## Results (2026-10-18, free tier)
 
-### Batching — `d4_batch_results.txt`
+### Batching — `data/d4_batch_results.txt`
 
 | N | tok/passage | median ms | passages/s | tokens/s |
 |---|-------------|-----------|------------|----------|
@@ -43,7 +52,7 @@ Response: `data[i]["embedding"]` (2048-dim float vector per input) + `usage.prom
 
 Throughput rises steeply because batching amortizes the fixed per-request cost — network, queueing, kernel launch — and lets the GPU process all passages in one forward pass.
 
-### Concurrency — `d5_concurrency_results.txt`
+### Concurrency — `data/d5_concurrency_results.txt`
 
 | C | req/s | passages/s | lat p50 | 429s |
 |---|-------|------------|---------|------|
@@ -61,8 +70,9 @@ Runs on different days show the same pattern with different absolute numbers (ho
 
 ```
 export NVIDIA_API_KEY=...    # never commit keys
-python3 nim_step4_batch.py
-python3 nim_step5_concurrency.py
+python3 src/nim_step4_batch.py
+python3 src/nim_step5_concurrency.py
+python3 -m pytest tests/     # or: python3 tests/test_compile.py
 ```
 
 ## Next
@@ -78,4 +88,19 @@ python3 nim_step5_concurrency.py
 | 64 | 1902.9 | 1743.1 | 0.92x |
 | 256 | 2615.8 | 2657.6 | 1.02x |
 
-No 2x at 1B + short ISL: the ratio climbs monotonically with batch size (0.59x at N=1 to 1.02x eager; up to 1.21x at ISL~1024 with CUDA graphs on). The blog's "up to 2x" sentence specifies no engine, ISL, or batch; on vLLM we could not reach it for a dense 1B encoder. Community measurements put large FP4 gains behind tuned kernels (SGLang 2.2-3.5x on MoE) and weight-bound workloads, while vLLM's generic CUTLASS path caps near 1.2x for dense models and goes sub-1x at batch 1.
+No 2x at 1B + short ISL offline: the ratio climbs monotonically with batch size (0.59x at N=1 to 1.02x eager; up to 1.21x at ISL~1024 with CUDA graphs on). The blog's "up to 2x" sentence specifies no engine, ISL, or batch.
+
+### Correction from community evidence (2026-10-21)
+
+vLLM itself is not the ceiling: Jarvislabs measured **1.92x-2.50x** NVFP4 vs BF16 with **vLLM online serving** of Qwen3-32B on RTX PRO 6000 Blackwell (concurrency 8 to unlimited). The binding variables are **model size (fat GEMMs) and online concurrency**, not the engine. Whether a 1B prefill-only embedding encoder reaches the same regime is an open question — decode-bound generation and prefill-bound encoding are not isomorphic. Next step: reproduce the Jarvislabs recipe (serve + concurrency sweep) against both checkpoints.
+
+### Who has independently verified the 2x claim for this specific model? Nobody.
+
+| Party | Blackwell hardware | Independently measured | 2x claim |
+|-------|:---:|---|---|
+| NVIDIA (blog) | GB200, RTX PRO 6000 | Fig.5 NIM vs vLLM (precision unlabeled in the figure) | source of the claim |
+| Zep (partner, has RTX PRO 6000) | yes | BF16 encode 1,535 short facts/s + retrieval accuracy | **quoted NVIDIA verbatim, no independent 2x run** |
+| Baseten (hosting partner) | yes | model launch | restated official spec |
+| Open-source community | partial | generic Qwen/Llama NVFP4 benchmarks | no end-to-end curve for this model |
+
+Fig.5 note: at GB200 ISL-1024 the figure's own numbers show vLLM ahead on both throughput (856 vs 785 req/s) and p90 latency (75 vs 83 ms), so "matches or outperforms across ISLs of 256 & 1024" holds in three of four configurations, not all four.
